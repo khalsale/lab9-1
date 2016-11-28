@@ -1,197 +1,73 @@
 <?php
+/**
+ * REST server for order system
+ *
+ * ------------------------------------------------------------------------
+ */
+require APPPATH . '/third_party/restful/libraries/Rest_controller.php';
 
-defined('BASEPATH') OR exit('No direct script access allowed');
+class Maintenance extends Rest_Controller {
 
-class Maintenance extends Application
-{
+	function __construct()
+	{
+		parent::__construct();
+		$this->load->model('Menu');
+	}
 
-    function __construct(){
-        parent::__construct();
-        $this->load->helper('formfields_helper');
-        $this->error_messages = array();
+    // Handle an incoming GET - cRud
+    function index_get()
+    {
+        $key = $this->get('id');
+        if (!$key)
+        {
+            $this->response($this->menu->all(), 200);
+        } else
+        {
+            $result = $this->menu->get($key);
+            if ($result != null)
+                $this->response($result, 200);
+            else
+                $this->response(array('error' => 'Menu item not found!'), 404);
+        }
     }
 
-    public function index() {
-        $userrole = $this->session->userdata('userrole');
-
-        if ($userrole != 'admin') {
-            $msg = '<p> You are not authorized to access this page. Go away </p>';
-            $this->data['content'] = $msg;
-            $this->render();
-            return;
-         }
-
-         $this->data['pagebody' ] ='mtce';
-         $this->data['items'] = $this->menu->all();
-         $this->render();
-    }
-
-    function save() {
-        // try the session first
-        $key = $this->session->userdata('key');
-        $record = $this->session->userdata('record');
-        // if not there, nothing is in progress
-
-        if (empty($record)) {
-            $this->index();
-            return;
-        }
-
-        // update our data transfer object
-        $incoming = $this->input->post();
-        foreach(get_object_vars($record) as $index => $value)
-            if (isset($incoming[$index]))
-                $record->$index = $incoming[$index];
-
-        // checking if new image was uploaded
-        $newguy = $_FILES['replacement'];
-
-        if (!empty($newguy['name'])) {
-            $record->picture = $this->replace_picture ();
-
-            if ($record->picture != null)
-                $_POST['picture'] = $record->picture; // override picture name
-        }
-
-        $this->session->set_userdata('record',$record);
-
-        // validate
-        $this->load->library('form_validation');
-        $this->form_validation->set_rules($this->menu->rules());
-        if ($this->form_validation->run() != TRUE)
-            $this->error_messages = $this->form_validation->error_array();
-
-        // check menu code for additions
-        if ($key == null)
-            if ($this->menu->exists($record->id))
-                $this->error_messages[] = 'Duplicate key adding new menu item';
-
-        if (! $this->categories->exists($record->category))
-            $this->error_messages[] = 'Invalid category code: ' . $record->category;
-
-        // save or not
-        if (! empty($this->error_messages)) {
-            $this->edit();
-            return;
-        }
-
-        // update our table, finally!
-        if ($key == null)
-            $this->menu->add($record);
+    // Handle an incoming GET ... return 1 menu item
+    // GET /maintenance/item/123
+    function item_get()
+    {
+        $key = $this->get('id');
+        $result = $this->menu->get($key);
+        if ($result != null)
+            $this->response($result, 200);
         else
-            $this->menu->update($record);
-
-        // and redisplay the list
-        $this->index();
-
+            $this->response(array('error' => 'Menu item not found!'), 404);
     }
 
-    function edit($id=null) {
-         // try the session first
-         $key = $this->session->userdata('key');
-         $record = $this->session->userdata('record');
-
-         // if not there, get them from the database
-         if (empty($record)) {
-             $record = $this->menu->get($id);
-             $key = $id;
-             $this->session->set_userdata('key',$id);
-             $this->session->set_userdata('record',$record);
-         }
-
-         $this->data['action'] = (empty($key)) ? 'Adding' : 'Editing';
-
-         // build the form fields
-        $this->data['fid'] = makeTextField('Menu code', 'id', $record->id);
-        $this->data['fname'] = makeTextField('Item name', 'name', $record->name);
-        $this->data['fdescription'] = makeTextArea('Description', 'description', $record->description);
-        $this->data['fprice'] = makeTextField('Price, each', 'price', $record->price);
-        $this->data['fpicture'] = makeTextField('Item image', 'picture', $record->picture);
-
-        $cats = $this->categories->all(); // get an array of category objects
-
-        foreach ($cats as $code => $category) // make it into an associative array
-            $codes[$category->id] = $category->name;
-
-        $this->data['fcategory'] = makeCombobox('Category', 'category', $record->category, $codes);
-        $this->data['zsubmit'] = makeSubmitButton('Save', 'Submit changes');
-
-        // show the editing form
-        $this->data['pagebody'] = "mtce-edit";
-        $this->show_any_errors();
-        $this->render();
+    // Handle an incoming PUT - update a menu item
+    // POST TO /maintenance
+    function index_put()
+    {
+        $key = $this->get('id');
+        $record = array_merge(array('id' => $key), $this->_put_args);
+        $this->menu->update($record);
+        $this->response(array('ok'), 200);
     }
 
-    function cancel() {
-        $this->session->unset_userdata('key');
-        $this->session->unset_userdata('record');
-        $this->index();
+    // Handle an incoming POST - add a new menu item
+    //"/maintenance/item/id/123"
+    function index_post()
+    {
+        $key = $this->get('id');
+        $record = array_merge(array('id' => $key), $_POST);
+        $this->menu->add($record);
+        $this->response(array('ok'), 200);
     }
 
-
-    function show_any_errors() {
-        $result = '';
-
-        if (empty($this->error_messages)) {
-            $this->data['error_messages'] = '';
-            return;
-        }
-
-        // add the error messages to a single string with breaks
-        foreach($this->error_messages as $onemessage)
-            $result .= $onemessage . '<br/>';
-
-        // and wrap these per our view fragment
-        $this->data['error_messages'] = $this->parser->parse('mtce-errors',
-            ['error_messages' => $result], true);
+    // Handle an incoming DELETE - delete a menu item
+    function item_delete()
+    {
+        $key = $this->get('id');
+        $this->menu->delete($key);
+        $this->response(array('ok'), 200);
     }
-
-
-    // handle uploaded image, and use its name as the picture name
-    function replace_picture() {
-        $config = [
-            'upload_path' => './images', // relative to front controller
-            'allowed_types' => 'gif|jpg|jpeg|png',
-            'max_size' => 100, // 100KB should be enough for our graphical menu
-            'max_width' => 256,
-            'max_height' => 256, // actually, we want exactly 256x256
-            'min_width' => 256,
-            'min_height' => 256, // fixed it
-            'remove_spaces' => TRUE, // eliminate any spaces in the name
-            'overwrite' => TRUE, // overwrite existing image
-        ];
-        $this->load->library('upload', $config);
-
-        if (!$this->upload->do_upload('replacement')) {
-            $this->error_messages[] = $this->upload->display_errors();
-            return NULL;
-        } else {
-            return $this->upload->data('file_name');
-        }
-    }
-
-
-    function delete() {
-        $key = $this->session->userdata('key');
-        $record = $this->session->userdata('record');
-        // only delete if editing an existing record
-
-        if (! empty($record))
-            $this->menu->delete($key);
-
-        $this->index();
-    }
-
-
-    function add() {
-        $key = NULL;
-
-        $record = $this->menu->create();
-
-        $this->session->set_userdata('key', $key);
-        $this->session->set_userdata('record', $record);
-
-        $this->edit();
-    }
-
 }
